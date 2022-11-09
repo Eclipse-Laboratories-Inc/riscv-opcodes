@@ -929,6 +929,47 @@ func encode(a obj.As) *inst {
     except:
         pass
 
+def contained(small, big):
+    for i in small:
+        if i not in big:
+            return False
+    return True
+
+def make_rust_macros(instr_dict):
+    out = ""
+    maxlen = 0
+    for name in instr_dict:
+        maxlen = max(maxlen, len(name))
+    for name, info in instr_dict.items():
+        bits = info["encoding"][::-1]
+        opcode = bits[6::-1]
+        funct3 = bits[14:11:-1]
+        funct7 = bits[31:24:-1]
+        if contained(["rs1", "rs2", "rd"], info["variable_fields"]):
+            instype = "R"
+        elif contained(["rs1", "rd", "imm12"], info["variable_fields"]):
+            instype = "I"
+        elif contained(["imm12hi", "rs1", "rs2", "imm12lo"], info["variable_fields"]):
+            instype = "S"
+        elif contained(["bimm12hi", "rs1", "rs2", "bimm12lo"], info["variable_fields"]):
+            instype = "B"
+        elif contained(["rd", "imm20"], info["variable_fields"]):
+            instype = "U"
+        elif contained(["rd", "jimm20"], info["variable_fields"]):
+            instype = "J"
+        else:
+            logging.info(f"Encountered unknown instruction type for '{name}'")
+            continue
+        line = f"define_instruction!({name}, {(maxlen - len(name)) * ' '}{instype}, 0b{opcode}"
+        if instype in "RISB":
+            line += f", 0b{funct3}"
+        if instype == "R":
+            line += f", 0b{funct7}"
+        line += ");\n"
+        out += line
+    with open('macros.rs', 'w') as file:
+        file.write(out)
+
 def signed(value, width):
   if 0 <= value < (1<<(width-1)):
     return value
@@ -940,7 +981,7 @@ if __name__ == "__main__":
     print(f'Running with args : {sys.argv}')
 
     extensions = sys.argv[1:]
-    for i in ['-c','-latex','-chisel','-sverilog','-rust', '-go', '-spinalhdl']:
+    for i in ['-c','-latex','-chisel','-sverilog','-rust', '-go', '-spinalhdl', '-rustmacros']:
         if i in extensions:
             extensions.remove(i)
     print(f'Extensions selected : {extensions}')
@@ -986,3 +1027,7 @@ if __name__ == "__main__":
         logging.info('instr-table.tex generated successfully')
         make_priv_latex_table()
         logging.info('priv-instr-table.tex generated successfully')
+
+    if '-rustmacros' in sys.argv[1:]:
+        make_rust_macros(instr_dict)
+        logging.info('macros.rs generated successfully')
